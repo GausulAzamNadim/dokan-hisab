@@ -19,7 +19,7 @@ h2{font-size:19px;margin:5px 0 14px}h3{font-size:16px;margin:0 0 12px}.row{displ
 <body>
 <header><div><h1>🛍️ দোকান হিসাব</h1><small>Stock · Sales · Due · Cash · Reports</small></div><div id="today"></div></header>
 <div class="wrap">
-<div class="notice"><b>গুরুত্বপূর্ণ:</b> এই সংস্করণটি বিনামূল্যের অফলাইন-সক্ষম সফটওয়্যার। তথ্য এই ব্রাউজার/ডিভাইসে সেভ হবে। নিয়মিত <b>ডেটা ব্যাকআপ</b> ডাউনলোড করুন; ব্রাউজারের ডেটা মুছে গেলে ব্যাকআপ ছাড়া তথ্য ফেরত পাওয়া যাবে না।</div>
+<div class="notice"><b>ক্লাউড ডেটাবেস চালু:</b> আপনার সব তথ্য Firebase ক্লাউডে সেভ হয়, তাই রিফ্রেশ করলে বা অন্য ফোন/কম্পিউটারে খুললেও একই ডেটা দেখা যাবে। তবুও মাঝে মাঝে <b>ব্যাকআপ</b> নিয়ে রাখুন। <div id="cloudStatus" style="margin-top:6px;font-weight:700">☁️ যুক্ত হচ্ছে...</div></div>
 <nav class="noprint" id="nav">
 <button class="tab active" data-tab="dashboard">ড্যাশবোর্ড</button><button class="tab" data-tab="products">পণ্য ও স্টক</button><button class="tab" data-tab="purchase">মাল ক্রয়</button><button class="tab" data-tab="sale">বিক্রয়</button><button class="tab" data-tab="people">কাস্টমার/সাপ্লায়ার</button><button class="tab" data-tab="cash">ক্যাশ ও খরচ</button><button class="tab" data-tab="reports">রিপোর্ট</button><button class="tab" data-tab="backup">ব্যাকআপ</button>
 </nav>
@@ -62,12 +62,56 @@ h2{font-size:19px;margin:5px 0 14px}h3{font-size:16px;margin:0 0 12px}.row{displ
 <div class="box"><h2>ডেটা ব্যাকআপ ও রিস্টোর</h2><p>নিরাপদে রাখতে নিয়মিত JSON ব্যাকআপ ডাউনলোড করে রাখুন। নতুন ব্রাউজার/কম্পিউটারে Restore করলে আগের তথ্য ফিরবে।</p><div class="actions"><button onclick="backup()">ব্যাকআপ ডাউনলোড</button><label class="tab" style="display:inline-flex;align-items:center">ব্যাকআপ Restore <input type="file" id="restoreFile" accept=".json,application/json" style="display:none" onchange="restore(event)"></label><button class="danger" onclick="resetAll()">সব ডেটা মুছুন</button></div><div class="notice">সতর্কতা: Restore করলে বর্তমান ডেটা প্রতিস্থাপিত হবে। সব ডেটা মুছুন অপশনটি ব্যবহার করলে আর ফেরত পাওয়া যাবে না—আগে ব্যাকআপ নিন।</div><p id="backupInfo" class="muted"></p></div>
 </section>
 </div>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ====== এখানে আপনার Firebase config বসান ======
+const firebaseConfig = {
+  apiKey: "AIzaSyBBi3srKXLYlWoaCj566-aH6FTZ5dy0Jtk",
+  authDomain: "shop-2e135.firebaseapp.com",
+  projectId: "shop-2e135",
+  storageBucket: "shop-2e135.firebasestorage.app",
+  messagingSenderId: "330400961046",
+  appId: "1:330400961046:web:8f6c3f64345f7366811b37"
+};
+// ================================================
+
+const app = initializeApp(firebaseConfig);
+window.fbDb = getFirestore(app);
+window.fbDoc = doc; window.fbGetDoc = getDoc; window.fbSetDoc = setDoc;
+window.fbReady = true;
+window.dispatchEvent(new Event('firebase-ready'));
+</script>
 <script>
 const KEY='dokanhisab_v1';
-let db=load(),cart=[];
+let db=fresh(),cart=[],cloudReady=false;
 function fresh(){return {products:[],people:[],purchases:[],sales:[],cash:[]}}
-function load(){try{return JSON.parse(localStorage.getItem(KEY))||fresh()}catch(e){return fresh()}}
-function save(){localStorage.setItem(KEY,JSON.stringify(db));renderAll()}
+function normalize(d){let f=fresh();d=d||{};for(let k in f)f[k]=Array.isArray(d[k])?d[k]:[];return f}
+function load(){try{return normalize(JSON.parse(localStorage.getItem(KEY)))}catch(e){return fresh()}}
+function setStatus(t,c){let el=document.getElementById('cloudStatus');if(el){el.textContent=t;el.style.color=c||'#555'}}
+function persist(){
+ localStorage.setItem(KEY,JSON.stringify(db));
+ if(!cloudReady)return;
+ setStatus('☁️ সেভ হচ্ছে...','#b45309');
+ fbSetDoc(fbDoc(fbDb,'shops','main'),JSON.parse(JSON.stringify(db)))
+  .then(()=>setStatus('☁️ ক্লাউডে সেভ হয়েছে','#15803d'))
+  .catch(e=>{console.error(e);setStatus('⚠️ ক্লাউডে সেভ হয়নি: '+e.code,'#b91c1c')});
+}
+function save(){persist();renderAll()}
+async function initCloud(){
+ db=load();renderAll();
+ try{
+  setStatus('☁️ ক্লাউড থেকে ডেটা আনা হচ্ছে...','#b45309');
+  const snap=await fbGetDoc(fbDoc(fbDb,'shops','main'));
+  if(snap.exists()){db=normalize(snap.data())}
+  else if(db.products.length||db.sales.length||db.purchases.length||db.people.length){/* পুরোনো লোকাল ডেটা ক্লাউডে তুলে দেওয়া হবে */}
+  cloudReady=true;
+  localStorage.setItem(KEY,JSON.stringify(db));
+  if(!snap.exists())persist();else setStatus('☁️ ক্লাউডের সাথে যুক্ত','#15803d');
+  renderAll();
+ }catch(e){console.error(e);setStatus('⚠️ ক্লাউডে যুক্ত হওয়া যায়নি ('+(e.code||e.message)+')। ডেটা শুধু এই ডিভাইসে সেভ হচ্ছে।','#b91c1c')}
+}
 const $=id=>document.getElementById(id), today=()=>new Date().toISOString().slice(0,10);
 function money(n){return '৳'+Number(n||0).toLocaleString('en-BD',{minimumFractionDigits:2,maximumFractionDigits:2})}
 function num(id){return Number($(id).value)||0}
@@ -91,12 +135,12 @@ function quickAddPerson(type){
  let phone=prompt('মোবাইল নম্বর (ঐচ্ছিক):')||'';
  let person={id:uid(),name,phone:phone.trim(),type};
  db.people.push(person);
- localStorage.setItem(KEY,JSON.stringify(db));
+ persist();
  renderAll();
  $(type==='supplier'?'buyPerson':'salePerson').value=person.id;
  alert('নতুন '+label+' যোগ হয়েছে। এখন লেনদেনের এন্ট্রি সম্পন্ন করুন।');
 }
-function savePerson(){let name=$('personName').value.trim();if(!name)return alert('নাম লিখুন');let id=$('personId').value,obj={id:id||uid(),name,phone:$('personPhone').value.trim(),type:$('personType').value};if(id)db.people=db.people.map(p=>p.id===id?obj:p);else db.people.push(obj);clearPersonForm();save()}
+function savePerson(){let name=$('personName').value.trim();if(!name)return alert('নাম লিখুন');let id=$('personId').value,obj={id:id||uid(),name,phone:$('personPhone').value.trim(),type:$('personType').value};if(id)db.people=db.people=db.people.map(p=>p.id===id?obj:p);else db.people.push(obj);clearPersonForm();save()}
 function editPerson(id){let p=db.people.find(x=>x.id===id);if(!p)return;$('personId').value=p.id;$('personName').value=p.name;$('personPhone').value=p.phone||'';$('personType').value=p.type;$('personSaveBtn').textContent='পরিবর্তন সেভ করুন';$('personName').focus()}
 function clearPersonForm(){$('personId').value='';$('personName').value='';$('personPhone').value='';$('personType').value='customer';$('personSaveBtn').textContent='যোগ করুন'}
 function deletePerson(id){let used=db.sales.some(x=>x.person===id)||db.purchases.some(x=>x.person===id);if(used)return alert('এই ব্যক্তি/প্রতিষ্ঠানের লেনদেন আছে। হিসাবের ইতিহাস ঠিক রাখতে মুছতে পারবেন না; নাম বা মোবাইল Edit করুন।');if(confirm('এই নামটি মুছবেন?')){db.people=db.people.filter(p=>p.id!==id);save()}}
@@ -121,6 +165,8 @@ function resetAll(){if(confirm('নিশ্চিত? সব পণ্য ও �
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{if(!b.dataset.tab)return;document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('active',x.id===b.dataset.tab));if(b.dataset.tab==='reports')renderReports()}));
 $('buyProduct').addEventListener('change',()=>{let p=db.products.find(x=>x.id===$('buyProduct').value);if(p)$('buyRate').value=p.cost});
 $('saleProduct').addEventListener('change',()=>{let p=db.products.find(x=>x.id===$('saleProduct').value);if(p)$('saleRate').value=p.price});
-['buyDate','saleDate','cashDate'].forEach(id=>$(id).value=today());$('today').textContent=new Date().toLocaleDateString('bn-BD',{dateStyle:'full'});renderAll();
+['buyDate','saleDate','cashDate'].forEach(id=>$(id).value=today());$('today').textContent=new Date().toLocaleDateString('bn-BD',{dateStyle:'full'});
+window.addEventListener('firebase-ready',initCloud);
+if(window.fbReady)initCloud();
 </script>
 </body></html>
